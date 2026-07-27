@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Física I 2025</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+html, body { margin: 0; padding: 0; height: 100%; }
+iframe { border: none; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<iframe id="visor"></iframe>
+<script>
+const params = new URLSearchParams(window.location.search);
+const file = params.get("file");
+if (!file) {
+  document.body.innerHTML = "<p>No se proporcionó un archivo PDF.</p>";
+} else {
+  document.getElementById("visor").src =
+    "pdfjs/web/viewer.html?file=" + encodeURIComponent(file);
+}
+</script>
+</body>
+</html>
