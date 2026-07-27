@@ -1,8 +1,5 @@
-import os
-import json
-import io
+import os, json, io, zipfile, re 
 import urllib.request
-import zipfile, re
 from urllib.parse import quote
 
 import fitz
@@ -125,7 +122,7 @@ def crear_logo_pdf(ruta_salida=os.path.join(STATIC_DIR, "logo.webp"), tamaño=(1
 
     img = Image.new("RGB", tamaño, fondo_rojo)
     draw = ImageDraw.Draw(img)
-    texto = "Física"
+    texto = "PDF"
     padding = int(tamaño[0] * 0.1)
     
     fuente_size = int(tamaño[1] * 0.8)
@@ -159,7 +156,7 @@ def crear_logo_pwa(ruta_salida=os.path.join(STATIC_DIR, "logo_pwa.png"), tamaño
         draw = ImageDraw.Draw(img)
         radio = size // 2
         draw.ellipse((0, 0, 2*radio, 2*radio), fill=fondo_rojo)
-        texto = "Física"
+        texto = "PDF"
         padding = int(radio * 0.2)
         fuente_size = int(radio * 1.5)
         while fuente_size > 1:
@@ -205,7 +202,7 @@ def crear_manifest():
         "display": "standalone",
         "background_color": "#dc143c",
         "theme_color": "#dc143c",
-        "description": "Lecturas de Física 1",
+        "description": "Lecturas de PDFs",
         "icons": [
             {"src": "logo_pwa-192.png", "sizes": "192x192", "type": "image/png"},
             {"src": "logo_pwa-512.png", "sizes": "512x512", "type": "image/png"},
@@ -543,7 +540,7 @@ def generar_html(pdfs):
 </div>
 <footer>
 <img src="static/logo.webp" alt="{folder_name}">
-<p>© 2025 Física Web App</p>
+<p>© 2026 PDF Web App</p>
 </footer>
 </body>
 </html>
@@ -559,7 +556,7 @@ def generar_viewer_html():
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Física I 2025</title>
+<title>PDFs</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 html, body { margin: 0; padding: 0; height: 100%; }
