@@ -1,0 +1,630 @@
+import os
+import json
+import io
+import urllib.request
+import zipfile, re
+from urllib.parse import quote
+
+import fitz
+from PIL import Image, ImageDraw, ImageFont
+
+BASE_DIR = os.getcwd()
+PDF_DIR = BASE_DIR
+REPO = os.path.basename(BASE_DIR)
+ANCHO = 332
+ALTO = 443
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+PDFJS_DIR = os.path.join(STATIC_DIR, "pdfjs")
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+
+# --- Funciones ---
+
+def descargar_pdfjs():
+    """Descarga y extrae la última versión estable de PDF.js en static/pdfjs/"""
+    zip_path = os.path.join(STATIC_DIR, "pdfjs-dist.zip")
+
+    if os.path.exists(PDFJS_DIR):
+        print("PDF.js ya está descargado.")
+        return
+
+    print("Descargando la última version de PDF.js...")
+
+    try:
+        # 1. Obtener la página de releases para extraer la última versión
+        releases_url = "https://github.com/mozilla/pdf.js/releases/latest"
+        
+        # Configurar headers para simular un navegador
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        req = urllib.request.Request(releases_url, headers=headers)
+        
+        with urllib.request.urlopen(req) as response:
+            html = response.read().decode('utf-8')
+        
+        # 2. Extraer la versión con regex (busca el tag en la URL de descarga)
+        # Patrón: busca algo como /releases/tag/v5.4.149 o /releases/download/v5.4.149/
+        match = re.search(r'/releases/(?:tag|download)/(v[\d.]+)', html)
+        
+        if not match:
+            # Intentar otro patrón
+            match = re.search(r'pdfjs-([\d.]+)-dist\.zip', html)
+            
+        if match:
+            latest_version = match.group(1)
+            print(f"Última versión encontrada: {latest_version}")
+        else:
+            # Si no encontramos, usar versión por defecto
+            print("No se pudo detectar la última versión. Usando v5.4.149...")
+            latest_version = "v5.4.149"
+        
+        # 3. Construir la URL de descarga
+        version_num = latest_version.lstrip('v')  # Quitar la 'v' del tag si existe
+        download_url = f"https://github.com/mozilla/pdf.js/releases/download/{latest_version}/pdfjs-{version_num}-dist.zip"
+        
+        print(f"Descargando PDF.js {latest_version} desde:")
+        print(f"   {download_url}")
+        
+        # 4. Descargar el archivo
+        urllib.request.urlretrieve(download_url, zip_path)
+        print("Descarga completada")
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(PDFJS_DIR)
+
+        os.remove(zip_path)
+        print(f"PDF.js {latest_version} instalado en static/pdfjs/")
+
+    except Exception as e:
+        print(f"Error al obtener la última versión: {e}")
+        print("Usando versión por defecto (v5.4.149)...")
+        
+        # Fallback a una versión conocida si falla todo
+        url_fallback = "https://github.com/mozilla/pdf.js/releases/download/v5.4.149/pdfjs-5.4.149-dist.zip"
+        print(f"Descargando versión fallback...")
+        
+        try:
+            urllib.request.urlretrieve(url_fallback, zip_path)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(PDFJS_DIR)
+            
+            os.remove(zip_path)
+            print("PDF.js instalado (versión fallback)")
+        except Exception as e2:
+            print(f"Error crítico al descargar PDF.js: {e2}")
+            print("El sitio funcionará pero sin visor de PDFs integrado.")
+
+
+if False:
+    def buscar_pdfs_en_root(base_dir):
+        """Busca PDFs en la carpeta raíz y devuelve lista de tuplas (ruta, carpeta, archivo)"""
+        pdfs = []
+        for f in os.listdir(base_dir):
+            if f.lower().endswith(".pdf"):
+                pdfs.append((os.path.join(base_dir, f), ".", f))
+        pdfs.sort(key=lambda x:  x[2].lower())
+        return pdfs
+
+
+def buscar_pdfs_recursivo(base_dir):
+    """Busca PDFs en base_dir y subcarpetas, devuelve lista de tuplas (ruta_completa, carpeta_relativa, archivo)."""
+    pdfs = []
+    for root, _, files in os.walk(base_dir):
+        for f in files:
+            if f.lower().endswith(".pdf"):
+                ruta_completa = os.path.join(root, f)
+                carpeta_relativa = os.path.relpath(root, base_dir)
+                pdfs.append((ruta_completa, carpeta_relativa, f))
+    # Orden: primero carpeta, luego nombre de archivo
+    pdfs.sort(key=lambda x: (x[1].lower(), x[2].lower()))
+    return pdfs
+
+def sanitizar_nombre(nombre):
+    """Sanitiza el nombre reemplazando guiones y guiones bajos por espacios y capitalizando."""
+    nombre_sin_ext = os.path.splitext(nombre)[0]
+    nombre_limpio = nombre_sin_ext.replace("-", " ").replace("_", " ")
+    if nombre_limpio:
+        nombre_limpio = nombre_limpio[0].upper() + nombre_limpio[1:]
+    return nombre_limpio
+
+
+def crear_logo_pdf(ruta_salida=os.path.join(STATIC_DIR, "logo.webp"), tamaño=(1024, 1024)):
+    """Crea un logo PDF en formato WEBP."""
+    fondo_rojo = (220, 20, 60)
+    texto_blanco = (255, 255, 255)
+
+    img = Image.new("RGB", tamaño, fondo_rojo)
+    draw = ImageDraw.Draw(img)
+    texto = "Física"
+    padding = int(tamaño[0] * 0.1)
+    
+    fuente_size = int(tamaño[1] * 0.8)
+    while fuente_size > 1:
+        try:
+            fuente = ImageFont.truetype(os.path.join(BASE_DIR, "arialbd.ttf"), size=fuente_size)
+        except OSError:
+            fuente = ImageFont.load_default()
+            break
+
+        bbox = draw.textbbox((0, 0), texto, font=fuente)
+        texto_ancho = bbox[2] - bbox[0]
+        texto_alto = bbox[3] - bbox[1]
+        if texto_ancho <= tamaño[0] - 2*padding and texto_alto <= tamaño[1] - 2*padding:
+                break
+        fuente_size -= 1
+    posicion = ((tamaño[0] - texto_ancho) // 2, (tamaño[1] - texto_alto) // 2)
+
+    draw.text(posicion, texto, fill=texto_blanco, font=fuente)
+    
+    img.save(ruta_salida, "WEBP")
+    print(f"Logo PDF creado: {ruta_salida}")
+
+def crear_logo_pwa(ruta_salida=os.path.join(STATIC_DIR, "logo_pwa.png"), tamaño=(1024, 1024)):
+    """Crea un logo circular para PWA / Google Play en PNG 512x512."""
+    fondo_rojo = (220, 20, 60, 255)  # RGBA
+    texto_blanco = (255, 255, 255, 255)
+    tamaños = [192, 512, 1024]
+    for size in tamaños:
+        # Imagen base RGBA
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))  # fondo transparente
+        draw = ImageDraw.Draw(img)
+
+        # Dibujar círculo rojo de fondo
+        radio = size // 2
+        draw.ellipse((0, 0, 2*radio, 2*radio), fill=fondo_rojo)
+        texto = "Física"
+        padding = int(radio * 0.2)
+        fuente_size = int(radio * 1.5)
+        while fuente_size > 1:
+            try:
+                fuente = ImageFont.truetype(os.path.join(BASE_DIR, "arialbd.ttf"), size=fuente_size)
+            except OSError:
+                fuente = ImageFont.load_default()
+                break
+                
+            bbox = draw.textbbox((0, 0), texto, font=fuente)
+            texto_ancho = bbox[2] - bbox[0]
+            texto_alto = bbox[3] - bbox[1]
+            
+            if texto_ancho <= 2*radio - 2*padding and texto_alto <= 2*radio - 2*padding:
+                    break
+            fuente_size -= 1
+        
+        posicion = ((2*radio - texto_ancho)//2, (2*radio - texto_alto)//2)
+        draw.text(posicion, texto, fill=texto_blanco, font=fuente)
+
+        ruta_salida = os.path.join(STATIC_DIR, f"logo_pwa-{size}.png")
+        img.save(ruta_salida, "PNG")
+        print(f"Logo PWA creado: {ruta_salida}")
+
+
+def crear_favicon():
+    """Crea favicon.ico a partir del logo."""
+    ruta_logo = os.path.join(STATIC_DIR, "logo.webp")
+    ruta_fav = os.path.join(STATIC_DIR, "favicon.ico")
+    img = Image.open(ruta_logo).convert("RGBA")
+    img = img.resize((512, 512), Image.LANCZOS)
+    img.save(ruta_fav, format="ICO")
+
+
+def crear_manifest():
+    """Crea el archivo site.webmanifest usando el nombre del repo."""
+    repo_name = os.path.basename(os.getcwd())
+    repo = sanitizar_nombre(repo_name)
+    manifest = {
+        "name": repo,
+        "short_name": repo + " App",
+        "start_url": "../index.html",
+        "display": "standalone",
+        "background_color": "#dc143c",
+        "theme_color": "#dc143c",
+        "description": "Lecturas de Física 1",
+        "icons": [
+            {"src": "logo_pwa-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "logo_pwa-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "logo_pwa-1024.png", "sizes": "1024x1024", "type": "image/png"},
+            {
+                "src": "favicon.ico",
+                "sizes": "512x512, 256x25, 192x192, 128x128, 64x64, 32x32, 16x16",
+                "type": "image/x-icon",
+            },
+        ],
+    }
+    ruta = os.path.join(STATIC_DIR, "site.webmanifest")
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=4)
+
+
+def crear_service_worker(pdfs):
+    """Crea el service-worker.js para caché de la PWA."""
+    urls = ["./", "static/logo.webp", "static/logo_pwa.png", "static/logo_pwa-192.png", "static/logo_pwa-512.png", "static/logo_pwa-1024.png", "static/favicon.ico", "static/site.webmanifest", "static/pdfjs/web/viewer.html", "static/pdfjs/build/pdf.mjs", "static/pdfjs/build/pdf.worker.mjs"]
+
+    for _, carpeta_rel, archivo in pdfs:
+        if archivo == "compressed.tracemonkey-pldi-09.pdf":
+            continue
+        base = os.path.splitext(archivo)[0]
+        miniatura = quote(f"static/{base}.webp")
+        ruta_pdf = os.path.join(carpeta_rel, archivo) if carpeta_rel != '.' else archivo
+        ruta_pdf = quote(ruta_pdf)
+        urls.append(ruta_pdf)
+        urls.append(miniatura)
+        
+    contenido = f"""
+const CACHE_NAME = "revistas-cache-v1";
+const urlsToCache = {urls};
+
+self.addEventListener("install", event => {{
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+  );
+}});
+
+self.addEventListener("activate", event => {{
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.map(key => {{
+        if (key !== CACHE_NAME) {{
+          return caches.delete(key);
+        }}
+      }}))
+    )
+  );
+}});
+
+self.addEventListener("fetch", event => {{
+  event.respondWith(
+    caches.match(event.request).then(response =>
+      response || fetch(event.request).catch(() =>
+        new Response("No hay conexión y el recurso no está en caché.", {{
+          headers: {{ "Content-Type": "text/plain" }}
+        }})
+      )
+    )
+  );
+}});
+"""
+    ruta_sw = os.path.join(BASE_DIR, "service-worker.js")
+    with open(ruta_sw, "w", encoding="utf-8") as f:
+        f.write(contenido.strip())
+
+
+def extraer_miniaturas(pdfs):
+    """Extrae la primera página de cada PDF y crea miniaturas WEBP."""
+    for ruta_pdf, _, archivo in pdfs:
+        base = os.path.splitext(archivo)[0]
+        salida_miniatura = os.path.join(STATIC_DIR, base + ".webp")
+        if os.path.exists(salida_miniatura):
+            continue
+            
+        try:
+            with fitz.open(ruta_pdf) as doc:
+                pagina = doc[0]
+                pix = pagina.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                img_red = img.resize((ANCHO, ALTO), Image.LANCZOS)
+                img_red.save(salida_miniatura, "WEBP", quality=80, lossless=True)
+        except Exception as e:
+            print(f"Error en {archivo}: {e}")
+
+
+def generar_html(pdfs):
+    """Genera el index.html con las miniaturas y títulos de los PDFs."""
+    folder_name = os.path.basename(os.getcwd())
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{folder_name}</title>
+    <link rel="icon" type="image/x-icon" href="static/favicon.ico">
+    <link rel="manifest" href="static/site.webmanifest">
+    <script src="service-worker.js"></script>
+    <style>
+        html, body {{
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow-x: hidden;
+            font-family: Arial, sans-serif;
+        }}
+        
+        #fondo {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }}
+        
+        #logo {{
+            margin: 20px auto;
+            width: 256px;
+            height: auto;
+            text-align: center;
+            border-radius: 30px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }}
+        
+        #logo img {{
+            display: block;
+            width: 100%;
+            height: auto;
+        }}
+        
+        .pdfs-container {{
+            display: grid;
+            gap: 20px;
+            justify-items: center;
+            padding: 20px;
+        }}
+
+        .pdfs-container.few-1 {{ grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }}
+        .pdfs-container.few-2 {{ grid-template-columns: repeat(2, 1fr); max-width: 700px; margin: 0 auto; }}
+        .pdfs-container:not(.few-1):not(.few-2) {{ grid-template-columns: repeat(3, 1fr); max-width: 100%; margin: 0 auto; }}
+
+
+        .pdf-container {{
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            background: #fff;
+            transition: transform 0.2s;
+            width: 100%;
+            max-width: 332px;
+        }}
+        
+        .pdf-container:hover {{
+            transform: scale(1.05);
+        }}
+        
+        .pdf-thumbnail {{
+            width: 100%;
+            height: auto;
+            cursor: pointer;
+            display: block;
+        }}
+
+        .pdf-row {{
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }}
+
+        .pdf-row-few {{
+            justify-content: center;
+        }}
+        
+        .pdf-title {{
+            text-align:center;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+            margin-top: 5px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }}
+        
+        @media (max-width: 768px) {{
+            #pdfs-container {{
+                grid-template-columns: 1fr 1fr;
+            }}
+        }}
+        
+        @media (max-width: 480px) {{
+            #pdfs-container {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+        
+        footer {{
+            text-align: center;
+            margin-top: 30px;
+            padding: 15px 0;
+            color: #555;
+            font-size: 14px;
+        }}
+        
+        footer img {{
+            max-width: 50px;
+            margin-bottom: 5px;
+            border-radius: 50px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }}
+
+        footer p {{
+            margin: 0;
+            font-size: 14px;
+            color: #555;
+        }}
+        
+        h2 {{
+            background-color: rgba(255, 255, 255, 0.8); 
+            color: #333;                             
+            text-align: center;                        
+            padding: 10px 0;                            
+            margin: 20px 40px;                      
+            border-radius: 10px;                    
+            width: calc(100% - 80px);                               
+            box-sizing: border-box;                       
+        }}
+        
+        #modal-visor {{
+            display: none;
+            position: fixed;
+            top:0; left:0;
+            width:100%; height:100%;
+            background-color: rgba(0,0,0,0.8);
+            z-index: 9999;
+        }}
+        
+        #modal-visor iframe {{
+            width:100%; height:100%;
+            display:block;
+            border:none;
+        }}
+        
+        #modal-visor .cerrar {{
+            position:absolute; top:50px; right:10px;
+            font-size:30px; color:green;
+            cursor:pointer;
+            z-index: 10000;
+        }}
+    </style>
+    
+    <div id="fondo"></div>
+    <script>
+    const fondo = document.getElementById('fondo');
+    let hue = 0;
+    function animateBackground() {{
+        hue = (hue + 0.5) % 360;
+        fondo.style.background = `linear-gradient(135deg, hsl(${{hue}}, 70%, 80%), hsl(${{(hue+60)%360}}, 70%, 80%))`;
+        requestAnimationFrame(animateBackground);
+    }}
+    animateBackground();
+</script>
+<script>
+    function abrirPDF(pdf) {{
+        const modal = document.getElementById('modal-visor');
+        const iframe = document.getElementById('visor-pdf');
+        iframe.src = `static/pdfjs/web/viewer.html?file=${{encodeURIComponent(pdf)}}`;
+        modal.style.display = 'block';
+    }}
+    function cerrarModal() {{
+        const modal = document.getElementById('modal-visor');
+        const iframe = document.getElementById('visor-pdf');
+        iframe.src = '';
+        modal.style.display = 'none';
+    }}
+</script>
+    <script>
+    if ('serviceWorker' in navigator) {{
+      window.addEventListener('load', function() {{
+        navigator.serviceWorker.register("service-worker.js").then(function(registration) {{
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }}, function(err) {{
+          console.log('ServiceWorker registration failed: ', err);
+        }});
+      }});
+    }}
+  </script>
+</head>
+<body>
+    <div id="logo">
+        <img src="static/logo.webp" alt="{folder_name}">
+    </div>
+"""
+    from collections import defaultdict
+    pdfs_por_carpeta = defaultdict(list)
+    
+    for ruta_completa, carpeta_rel, archivo in pdf_files:
+        if archivo == "compressed.tracemonkey-pldi-09.pdf":
+            continue
+        pdfs_por_carpeta[carpeta_rel].append((ruta_completa, archivo))
+        
+    for carpeta, archivos in sorted(pdfs_por_carpeta.items(), key=lambda x: x[0].lower()):
+        titulo_carpeta = "Lecturas Recomendadas" if carpeta == "." else sanitizar_nombre(os.path.basename(carpeta))
+        clase_grid = ""
+        if len(archivos) == 1:
+            clase_grid = "few-1"
+        elif len(archivos) == 2:
+            clase_grid = "few-2"
+            
+        html += f"<h2>{titulo_carpeta}</h2>\n"
+        html += '<div class="pdfs-container {clase_grid}">\n'
+    
+        for ruta_completa, archivo in sorted(archivos, key=lambda x: x[1].lower()):
+            ruta_pdf_js = f"/{REPO}/{os.path.relpath(ruta_completa, BASE_DIR).replace(os.sep, '/')}"
+            titulo_limpio = sanitizar_nombre(archivo)
+            ruta_miniatura = quote(f"static/{os.path.splitext(archivo)[0]}.webp")
+        
+            html += f"""
+            <div class="pdf-container">
+                <img src="{ruta_miniatura}" class="pdf-thumbnail" onclick="abrirPDF('{ruta_pdf_js}')">
+                <p class="pdf-title">{titulo_limpio}</p>
+            </div>
+"""
+        html += "</div>\n"
+
+    html += """
+<div id="modal-visor">
+    <span class="cerrar" onclick="cerrarModal()">&times;</span>
+    <iframe id="visor-pdf"></iframe>
+</div>
+<h2>Ejercicios Resueltos en Video</h2>
+<div class="pdfs-container few-1">
+    <iframe width="560" height="315"
+            src="https://www.youtube.com/embed/videoseries?si=iwcMW8_lYOMiyxTW&amp;list=PLCWTDHDLBfYK9_3pgykvzmkpJqszL0kFi"
+            title="Ejercicios Resueltos en video"
+            frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allowfullscreen>
+    </iframe>
+</div>
+<footer>
+<img src="static/logo.webp" alt="{folder_name}">
+<p>© 2025 Física Web App</p>
+</footer>
+</body>
+</html>
+"""
+    ruta_index = os.path.join(BASE_DIR, "index.html")
+    with open(ruta_index, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def generar_viewer_html():
+    """Genera un viewer.html que usa PDF.js desde CDN para mostrar PDFs."""
+    html_viewer = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Física I 2025</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+html, body { margin: 0; padding: 0; height: 100%; }
+iframe { border: none; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<iframe id="visor"></iframe>
+<script>
+const params = new URLSearchParams(window.location.search);
+const file = params.get("file");
+if (!file) {
+  document.body.innerHTML = "<p>No se proporcionó un archivo PDF.</p>";
+} else {
+  document.getElementById("visor").src =
+    "pdfjs/web/viewer.html?file=" + encodeURIComponent(file);
+}
+</script>
+</body>
+</html>"""
+ 
+    ruta_viewer = os.path.join(STATIC_DIR, "viewer.html")
+    with open(ruta_viewer, "w", encoding="utf-8") as f:
+        f.write(html_viewer)
+    print(f"viewer.html generado correctamente en {ruta_viewer}")
+
+
+# --- Ejecución ---
+
+pdf_files = buscar_pdfs_recursivo(PDF_DIR)
+extraer_miniaturas(pdf_files)
+descargar_pdfjs()
+crear_logo_pdf()
+crear_logo_pwa()
+crear_favicon()
+crear_manifest()
+crear_service_worker(pdf_files)
+generar_html(pdf_files)
+generar_viewer_html()
+
+print("Sitio PWA estático generado en '/' listo para GitHub Pages.")
