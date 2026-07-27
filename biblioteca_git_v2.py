@@ -17,9 +17,6 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 PDFJS_DIR = os.path.join(STATIC_DIR, "pdfjs")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-
-# --- Funciones ---
-
 def descargar_pdfjs():
     """Descarga y extrae la última versión estable de PDF.js en static/pdfjs/"""
     zip_path = os.path.join(STATIC_DIR, "pdfjs-dist.zip")
@@ -31,10 +28,8 @@ def descargar_pdfjs():
     print("Descargando la última version de PDF.js...")
 
     try:
-        # 1. Obtener la página de releases para extraer la última versión
         releases_url = "https://github.com/mozilla/pdf.js/releases/latest"
         
-        # Configurar headers para simular un navegador
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -44,30 +39,24 @@ def descargar_pdfjs():
         with urllib.request.urlopen(req) as response:
             html = response.read().decode('utf-8')
         
-        # 2. Extraer la versión con regex (busca el tag en la URL de descarga)
-        # Patrón: busca algo como /releases/tag/v5.4.149 o /releases/download/v5.4.149/
         match = re.search(r'/releases/(?:tag|download)/(v[\d.]+)', html)
         
         if not match:
-            # Intentar otro patrón
             match = re.search(r'pdfjs-([\d.]+)-dist\.zip', html)
             
         if match:
             latest_version = match.group(1)
             print(f"Última versión encontrada: {latest_version}")
         else:
-            # Si no encontramos, usar versión por defecto
             print("No se pudo detectar la última versión. Usando v5.4.149...")
             latest_version = "v5.4.149"
         
-        # 3. Construir la URL de descarga
-        version_num = latest_version.lstrip('v')  # Quitar la 'v' del tag si existe
+        version_num = latest_version.lstrip('v')
         download_url = f"https://github.com/mozilla/pdf.js/releases/download/{latest_version}/pdfjs-{version_num}-dist.zip"
         
         print(f"Descargando PDF.js {latest_version} desde:")
         print(f"   {download_url}")
         
-        # 4. Descargar el archivo
         urllib.request.urlretrieve(download_url, zip_path)
         print("Descarga completada")
         
@@ -80,8 +69,7 @@ def descargar_pdfjs():
     except Exception as e:
         print(f"Error al obtener la última versión: {e}")
         print("Usando versión por defecto (v5.4.149)...")
-        
-        # Fallback a una versión conocida si falla todo
+
         url_fallback = "https://github.com/mozilla/pdf.js/releases/download/v5.4.149/pdfjs-5.4.149-dist.zip"
         print(f"Descargando versión fallback...")
         
@@ -96,7 +84,6 @@ def descargar_pdfjs():
         except Exception as e2:
             print(f"Error crítico al descargar PDF.js: {e2}")
             print("El sitio funcionará pero sin visor de PDFs integrado.")
-
 
 if False:
     def buscar_pdfs_en_root(base_dir):
@@ -118,7 +105,7 @@ def buscar_pdfs_recursivo(base_dir):
                 ruta_completa = os.path.join(root, f)
                 carpeta_relativa = os.path.relpath(root, base_dir)
                 pdfs.append((ruta_completa, carpeta_relativa, f))
-    # Orden: primero carpeta, luego nombre de archivo
+    
     pdfs.sort(key=lambda x: (x[1].lower(), x[2].lower()))
     return pdfs
 
@@ -164,15 +151,12 @@ def crear_logo_pdf(ruta_salida=os.path.join(STATIC_DIR, "logo.webp"), tamaño=(1
 
 def crear_logo_pwa(ruta_salida=os.path.join(STATIC_DIR, "logo_pwa.png"), tamaño=(1024, 1024)):
     """Crea un logo circular para PWA / Google Play en PNG 512x512."""
-    fondo_rojo = (220, 20, 60, 255)  # RGBA
+    fondo_rojo = (220, 20, 60, 255)
     texto_blanco = (255, 255, 255, 255)
     tamaños = [192, 512, 1024]
     for size in tamaños:
-        # Imagen base RGBA
-        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))  # fondo transparente
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-
-        # Dibujar círculo rojo de fondo
         radio = size // 2
         draw.ellipse((0, 0, 2*radio, 2*radio), fill=fondo_rojo)
         texto = "Física"
@@ -556,17 +540,6 @@ def generar_html(pdfs):
 <div id="modal-visor">
     <span class="cerrar" onclick="cerrarModal()">&times;</span>
     <iframe id="visor-pdf"></iframe>
-</div>
-<h2>Ejercicios Resueltos en Video</h2>
-<div class="pdfs-container few-1">
-    <iframe width="560" height="315"
-            src="https://www.youtube.com/embed/videoseries?si=iwcMW8_lYOMiyxTW&amp;list=PLCWTDHDLBfYK9_3pgykvzmkpJqszL0kFi"
-            title="Ejercicios Resueltos en video"
-            frameborder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerpolicy="strict-origin-when-cross-origin"
-            allowfullscreen>
-    </iframe>
 </div>
 <footer>
 <img src="static/logo.webp" alt="{folder_name}">
